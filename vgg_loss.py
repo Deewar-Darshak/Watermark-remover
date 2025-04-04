@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 import torchvision
-import config
 
 class VGG19(nn.Module):
     def __init__(self, requires_grad=False):
@@ -29,11 +28,18 @@ class VGG19(nn.Module):
     def forward(self, x):
         h_relu1 = self.slice1(x)
         h_relu2 = self.slice2(h_relu1)
-        h_relu3 = self.slice2(h_relu2)
-        h_relu4 = self.slice3(h_relu3)
-        h_relu5 = self.slice3(h_relu4)
+        h_relu3 = self.slice3(h_relu2)
+        h_relu4 = self.slice4(h_relu3)
+        h_relu5 = self.slice5(h_relu4)
         out = [h_relu1, h_relu2, h_relu3, h_relu4, h_relu5]
         return out
+
+    def print_slices(self):
+        for i in range(1, 6):
+            slice_module = getattr(self, f'slice{i}')
+            print(f"slice{i}:")
+            for name, module in slice_module.named_children():
+                print(f"  {name}: {module}")
 
 class VGGLoss(nn.Module):
     def __init__(self):
@@ -48,3 +54,6 @@ class VGGLoss(nn.Module):
         for i in range(len(x_vgg)):
             loss += self.weights[i] * self.criterion(x_vgg[i], y_vgg[i].detach())
         return loss
+
+# vgg = VGG19()
+# vgg.print_slices()

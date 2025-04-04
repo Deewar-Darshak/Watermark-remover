@@ -1,43 +1,54 @@
-import numpy as np
-import config
 import os
 from PIL import Image
-from torch.utils.data import Dataset, DataLoader
-from torchvision.utils import save_image
-from PIL import ImageFile
-ImageFile.LOAD_TRUNCATED_IMAGES = True
+import numpy as np
+import torch
+from torch.utils.data import Dataset
 
-class WaterDataset(Dataset):
-    def __init__(self, root_dir):
-        self.root_dir = root_dir
-        self.list_files = os.listdir(root_dir)
+class WatermarkPatchDataset(Dataset):
+    def __init__(self, mark_dir, nomark_dir, kernel_size=256, stride=32,
+                 transform_input=None, transform_target=None):
+        self.mark_dir = mark_dir
+        self.nomark_dir = nomark_dir
+        self.kernel_size = kernel_size
+        self.stride = stride
+        self.transform_input = transform_input
+        self.transform_target = transform_target
+
+        self.mark_files = sorted([f for f in os.listdir(mark_dir) if f.endswith('_c.jpg')])
+
+        self.paired_patches = []
+        self._prepare_all_patches()
+
+    def _prepare_all_patches(self):
+        for mark_file in self.mark_files:
+            base_name = mark_file.replace('_c.jpg', '')
+            mark_path = os.path.join(self.mark_dir, mark_file)
+            nomark_path = os.path.join(self.nomark_dir, f'{base_name}_r.jpg')
+
+            mark_img = Image.open(mark_path).convert('RGB')
+            nomark_img = Image.open(nomark_path).convert('RGB')
+            nomark_img = nomark_img.resize(mark_img.size, Image.LANCZOS)
+
+            # Convert to numpy
+            mark_np = np.array(mark_img)
+            nomark_np = np.array(nomark_img)
+
+            # Apply transformations
+            mark_tensor = self.transform_input(image=mark_np)['image'] if self.transform_input else torch.from_numpy(mark_np).permute(2, 0, 1).float() / 255.
+            nomark_tensor = self.transform_target(image=nomark_np)['image'] if self.transform_target else torch.from_numpy(nomark_np).permute(2, 0, 1).float() / 255.
+
+            # Extract patches
+            _, H, W = mark_tensor.shape
+            mark_patches = mark_tensor.unfold(1, self.kernel_size, self.stride).unfold(2, self.kernel_size, self.stride)
+            nomark_patches = nomark_tensor.unfold(1, self.kernel_size, self.stride).unfold(2, self.kernel_size, self.stride)
+
+            mark_patches = mark_patches.permute(1, 2, 0, 3, 4).reshape(-1, 3, self.kernel_size, self.kernel_size)
+            nomark_patches = nomark_patches.permute(1, 2, 0, 3, 4).reshape(-1, 3, self.kernel_size, self.kernel_size)
+
+            self.paired_patches.extend(list(zip(mark_patches, nomark_patches)))
 
     def __len__(self):
-        return len(self.list_files)
+        return len(self.paired_patches)
 
-    def __getitem__(self, index):
-        img_file = self.list_files[index]
-        img_path = os.path.join(self.root_dir, img_file)
-        image = np.array(Image.open(img_path).convert('RGB'))
-        split_half = int(image.shape[1]/2)
-        input_image = image[:, :split_half, :]
-        target_image = image[:, split_half:, :]
-
-        # augmentations = config.both_transform(image=input_image, image0=target_image)
-        # input_image = augmentations["image"]
-        # target_image = augmentations["image0"]
-        #
-        # input_image = config.transform_only_input(image=input_image)["image"]
-        # target_image = config.transform_only_mask(image=target_image)["image"]
-
-        return input_image, target_image
-
-dataset = WaterDataset("data/train/")
-loader = DataLoader(dataset, batch_size=5)
-for x, y in loader:
-    print(x.shape)
-    save_image(x, "x.png")
-    save_image(y, "y.png")
-    import sys
-
-    sys.exit()
+    def __getitem__(self, idx):
+        return self.paired_patches[idx]  # (input_patch, target_patch)

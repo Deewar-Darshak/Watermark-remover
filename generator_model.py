@@ -29,7 +29,7 @@ class ResidualBlock(nn.Module):
             kernel_size=3,
             stride=1,
             padding=1,
-            use_act=False,
+            use_act=True,
         )
 
     def stochastic_depth(self, x):
@@ -56,10 +56,10 @@ class Block(nn.Module):
         return self.conv(x)
 
 class Generator(nn.Module):
-    def __init__(self, in_channels, features=64, num_residuals=9):
+    def __init__(self, in_channels=3, features=64, num_residuals=9):
         super().__init__()
         self.initial_down = nn.Sequential(
-            nn.Conv2d(in_channels, features, 7, 1, 3, bias=False, padding_mode="reflect"),
+            nn.Conv2d(in_channels, features, 7, 1, 3, bias=True, padding_mode="reflect"),
             nn.ReLU(inplace=True),
         )
         self.down1 = Block(features, features*2, act="relu")
