@@ -16,6 +16,10 @@ def run_on_patches(directory, model, kernel_size=256, stride=32, device='cpu', t
     if not train:
         model.eval()
 
+        window = torch.hann_window(kernel_size, device=device)
+        weight = window.unsqueeze(0)*window.unsqueeze(1)
+        weight = weight.expand(3, -1, -1)
+
     for idx, image_file in enumerate(os.listdir(directory)):
         image = Image.open(os.path.join(directory, image_file)).convert('RGB')
         width, height = image.size
@@ -30,15 +34,15 @@ def run_on_patches(directory, model, kernel_size=256, stride=32, device='cpu', t
             A.Normalize(mean=[0.5]*3, std=[0.5]*3, max_pixel_value=255.0),
             ToTensorV2()
         ])
-        image = augment(image=image)['image'].to(device)
-        img_size = image.shape[2]
+        image_tensor = augment(image=image)['image'].to(device)
+        img_size = image_tensor.shape[2]
 
-        image = image.permute(1, 2, 0)
+        image_tensor = image_tensor.permute(1, 2, 0)
 
         kh, kw = kernel_size, kernel_size
         dh, dw = stride, stride
 
-        patches = image.unfold(0, kh, dh).unfold(1, kw, dw)
+        patches = image_tensor.unfold(0, kh, dh).unfold(1, kw, dw)
         patches = patches.contiguous().view(-1, 3, kh, kw)
 
         batch_size = 32
@@ -50,10 +54,11 @@ def run_on_patches(directory, model, kernel_size=256, stride=32, device='cpu', t
             if not train:
                 with torch.no_grad():
                     patch = model(curr_patch)
+                patch = patch * weight.unsqueeze(0)
             else:
                 patch = model(curr_patch)
 
-            patches[from_idx:to_idx] = (patch * 0.5 + 0.5).cpu() if not train else patch.cpu()
+            patches[from_idx:to_idx] = patch.cpu()
 
         patches = patches.view(1, patches.shape[0], 3 * kernel_size * kernel_size).permute(0, 2, 1)
         output = F.fold(patches, output_size=(img_size, img_size), kernel_size=kernel_size, stride=dh)
@@ -62,19 +67,37 @@ def run_on_patches(directory, model, kernel_size=256, stride=32, device='cpu', t
                                kernel_size=kernel_size, stride=dh)
         output /= recovery_mask
 
+        # Denormalize and convert to uint8
+        output = output.squeeze(0)  # (3, H, W)
+        output = (output * 0.5 + 0.5).clamp(0, 1)  # [0, 1]
+        output_np = output.permute(1, 2, 0).cpu().numpy()  # (H, W, 3)
+        output_np = (output_np * 255).astype(np.uint8)
+
         augment_back = A.Compose([
             A.CenterCrop(height=max_size - int(pad_height), width=max_size - int(pad_width)),
             ToTensorV2(),
         ])
-        x = augment_back(image=output.squeeze(0).detach().cpu().permute(1, 2, 0).numpy())['image']
+
+        cropped_np = augment_back(image=output_np)['image']
 
         if save_results and not train:
-            save_image(x, f"saved/test_results_{idx}.png")
 
-        # Optionally return the image if needed for training loss or visualization
+            Image.fromarray(cropped_np).save(f"saved/test_results_{idx}.png")
+
         if train:
-            yield x  # You can yield or return a list of images if batching
-
+            yield output  # Return tensor for training
 
     if not train:
         model.train()
+    #     x = augment_back(image=output.squeeze(0).detach().cpu().permute(1, 2, 0).numpy())['image']
+    #
+    #     if save_results and not train:
+    #         save_image(x, f"saved/test_results_{idx}.png")
+    #
+    #     # Optionally return the image if needed for training loss or visualization
+    #     if train:
+    #         yield x  # You can yield or return a list of images if batching
+    #
+    #
+    # if not train:
+    #     model.train()

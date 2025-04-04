@@ -44,11 +44,18 @@ class VGG19(nn.Module):
 class VGGLoss(nn.Module):
     def __init__(self):
         super().__init__()
-        self.vgg = VGG19().cuda()
+        self.vgg = VGG19().to(torch.device("cuda" if torch.cuda.is_available() else "cpu"))
+        self.register_buffer('imagenet_mean', torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1))
+        self.register_buffer('imagenet_std', torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1))
         self.criterion = nn.L1Loss()
         self.weights = [1.0/32, 1.0/16, 1.0/8, 1.0/4, 1.0]
 
     def forward(self, x, y):
+        # Convert from [-1,1] to ImageNet-normalized [0,1]
+        x = (x + 1) / 2  # To [0,1]
+        y = (y + 1) / 2
+        x = (x - self.imagenet_mean) / self.imagenet_std
+        y = (y - self.imagenet_mean) / self.imagenet_std
         x_vgg, y_vgg = self.vgg(x), self.vgg(y)
         loss = 0
         for i in range(len(x_vgg)):

@@ -8,6 +8,8 @@ LEARNING_RATE = 2e-4
 BATCH_SIZE = 16
 NUM_WORKERS = 2
 NUM_EPOCHS = 10
+CLIP_GRAD = 1.0
+USE_AMP = True
 
 # Directories for WatermarkPatchDataset
 MARK_DIR = "dataset/mark"
